@@ -9,7 +9,7 @@ import torch
 import numpy as np
 
 class ADV_interp(object):
-    def __init__(self, criterion, num_classes=10, epsilon=1/32, epsilon_y=0.25, v_min=-1, v_max=1):
+    def __init__(self, criterion, num_classes=10, epsilon=0.3, epsilon_y=0.5, v_min=0, v_max=1):
         self.criterion = criterion
         self.num_classes = num_classes
         self.epsilon = epsilon
@@ -44,9 +44,8 @@ class ADV_interp(object):
 
         return x_tilde.detach(), y_tilde.detach()
     
-
 class PGD(object):
-    def __init__(self, criterion, epsilon=3e-3, iter=5, attack_lr=1e-2, v_min=-1, v_max=1, random_start=True):
+    def __init__(self, criterion, epsilon=0.3, iter=40, attack_lr=0.01, v_min=0, v_max=1, random_start=True):
         self.criterion = criterion
         self.epsilon = epsilon
         self.iter = iter
@@ -64,28 +63,33 @@ class PGD(object):
         else:
             batch_x_tilde = batch_x.detach()
 
-        batch_x = batch_x.cpu().numpy()
-
         for i in range(self.iter):
+            
             batch_x_tilde.requires_grad = True
-            batch_y_hat_tilde = model(batch_x_tilde)
+            
+            batch_y_hat_tilde = model(batch_x_tilde, mode="prediction")
+            
             loss = self.criterion(batch_y_hat_tilde, batch_y)
+            
             loss.backward()
 
             grad = batch_x_tilde.grad.data
 
             batch_x_tilde = batch_x_tilde + self.attack_lr * torch.sign(grad)
-            batch_x_tilde = batch_x_tilde.cpu().detach().numpy()
-
-            batch_x_tilde = np.clip(batch_x_tilde, batch_x - self.epsilon, batch_x + self.epsilon)
-            batch_x_tilde = np.clip(batch_x_tilde, self.v_min, self.v_max)
-            batch_x_tilde = torch.Tensor(batch_x_tilde)
-
+            batch_x_tilde = torch.max(torch.min(batch_x_tilde, batch_x + self.epsilon), batch_x - self.epsilon)
+            batch_x_tilde = torch.clamp(batch_x_tilde, self.v_min, self.v_max)
+            batch_x_tilde = batch_x_tilde.detach()
+        
+        batch_x_tilde.requires_grad = True
+        
         return batch_x_tilde, batch_y
     
 class FGSM(object):
-    def __init__(self, criterion, epsilon=1e-2, v_min=-1, v_max=1):
+    def __init__(self, criterion, epsilon=8/255, v_min=0, v_max=1):
         self.epsilon = epsilon
+        self.v_min = v_min
+        self.v_max = v_max
+        self.criterion = criterion
     
     def attack(self, model, batch_x, batch_y):
         model.eval()
